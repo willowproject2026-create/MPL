@@ -19,11 +19,28 @@ if st.button("Process Specifications", type="primary"):
     elif not uploaded_file:
         st.error("Error: Please upload a specification PDF file.")
     else:
-        with st.spinner("Analyzing specifications and generating procurement tables..."):
+        with st.spinner("Analyzing specifications and generating procurement tables. This may take a moment for large files..."):
             try:
                 # Configure AI
                 genai.configure(api_key=api_key)
-                model = genai.GenerativeModel('gemini-1.5-flash-latest')
+                
+                # Auto-detect the best available model from your API key
+                available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                
+                # Prioritize 1.5 Pro for complex parsing, then fallback to others
+                if 'models/gemini-1.5-pro' in available_models:
+                    target_model = 'gemini-1.5-pro'
+                elif 'models/gemini-1.5-pro-latest' in available_models:
+                    target_model = 'gemini-1.5-pro-latest'
+                elif 'models/gemini-1.5-flash' in available_models:
+                    target_model = 'gemini-1.5-flash'
+                elif 'models/gemini-pro' in available_models:
+                    target_model = 'gemini-pro'
+                else:
+                    # Ultimate fallback to whatever is available
+                    target_model = available_models[0].replace('models/', '')
+                    
+                model = genai.GenerativeModel(target_model)
                 
                 # Extract text from PDF
                 text = ""
@@ -36,7 +53,7 @@ if st.button("Process Specifications", type="primary"):
                 if not text.strip():
                     st.error("Error: Could not extract text from the PDF. It might be scanned or image-based.")
                 else:
-                    # AI Prompt
+                    # AI Prompt mapped to USA CSI standards
                     prompt = """
                     You are an expert construction project engineer. Analyze the following project specification document.
                     Please structure the output vertically.
@@ -58,7 +75,7 @@ if st.button("Process Specifications", type="primary"):
                     
                     response = model.generate_content(prompt + text)
                     
-                    st.success("Analysis Complete!")
+                    st.success(f"Analysis Complete! (Powered by {target_model})")
                     st.markdown("### Analysis Output")
                     st.markdown(response.text)
                     
