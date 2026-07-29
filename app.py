@@ -19,43 +19,34 @@ if st.button("Process Specifications", type="primary"):
     elif not uploaded_file:
         st.error("Error: Please upload a specification PDF file.")
     else:
-        with st.spinner("Analyzing specifications and generating procurement tables. This may take a moment for large files..."):
+        with st.spinner("Processing and parsing specification document..."):
             try:
                 # Configure AI
                 genai.configure(api_key=api_key)
                 
-                # Auto-detect the best available model from your API key
-                available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                # Using Gemini 1.5 Flash for efficiency
+                model = genai.GenerativeModel('gemini-1.5-flash')
                 
-                # Prioritize 1.5 Pro for complex parsing, then fallback to others
-                if 'models/gemini-1.5-pro' in available_models:
-                    target_model = 'gemini-1.5-pro'
-                elif 'models/gemini-1.5-pro-latest' in available_models:
-                    target_model = 'gemini-1.5-pro-latest'
-                elif 'models/gemini-1.5-flash' in available_models:
-                    target_model = 'gemini-1.5-flash'
-                elif 'models/gemini-pro' in available_models:
-                    target_model = 'gemini-pro'
-                else:
-                    # Ultimate fallback to whatever is available
-                    target_model = available_models[0].replace('models/', '')
-                    
-                model = genai.GenerativeModel(target_model)
-                
-                # Extract text from PDF
+                # Extract text from PDF safely (limiting excessive pages to stay within free tier limits)
                 text = ""
                 reader = PyPDF2.PdfReader(uploaded_file)
-                for page in reader.pages:
-                    extracted = page.extract_text()
+                total_pages = len(reader.pages)
+                
+                # Read up to first 150 pages to stay safely within free token limits per request
+                max_pages_to_read = min(total_pages, 150)
+                for i in range(max_pages_to_read):
+                    extracted = reader.pages[i].extract_text()
                     if extracted:
                         text += extracted + "\n"
                 
                 if not text.strip():
                     st.error("Error: Could not extract text from the PDF. It might be scanned or image-based.")
                 else:
+                    st.info(f"Successfully extracted text from {max_pages_to_read} out of {total_pages} pages. Analyzing for procurement items...")
+                    
                     # AI Prompt mapped to USA CSI standards
                     prompt = """
-                    You are an expert construction project engineer. Analyze the following project specification document.
+                    You are an expert construction project engineer. Analyze the following project specification text.
                     Please structure the output vertically.
                     Do not use any Arabic text in the output. The output must be entirely in English.
                     
@@ -75,7 +66,7 @@ if st.button("Process Specifications", type="primary"):
                     
                     response = model.generate_content(prompt + text)
                     
-                    st.success(f"Analysis Complete! (Powered by {target_model})")
+                    st.success("Analysis Complete!")
                     st.markdown("### Analysis Output")
                     st.markdown(response.text)
                     
