@@ -19,21 +19,19 @@ if st.button("Process Specifications", type="primary"):
     elif not uploaded_file:
         st.error("Error: Please upload a specification PDF file.")
     else:
-        with st.spinner("Processing and parsing specification document..."):
+        with st.spinner("Processing and analyzing specification document..."):
             try:
-                # Configure AI
+                # Configure AI using the stable standard model
                 genai.configure(api_key=api_key)
+                model = genai.GenerativeModel('gemini-pro')
                 
-                # Using Gemini 1.5 Flash for efficiency
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                
-                # Extract text from PDF safely (limiting excessive pages to stay within free tier limits)
+                # Extract text from PDF safely
                 text = ""
                 reader = PyPDF2.PdfReader(uploaded_file)
                 total_pages = len(reader.pages)
                 
-                # Read up to first 150 pages to stay safely within free token limits per request
-                max_pages_to_read = min(total_pages, 150)
+                # Read up to first 120 pages to stay completely secure within free limits
+                max_pages_to_read = min(total_pages, 120)
                 for i in range(max_pages_to_read):
                     extracted = reader.pages[i].extract_text()
                     if extracted:
@@ -42,7 +40,7 @@ if st.button("Process Specifications", type="primary"):
                 if not text.strip():
                     st.error("Error: Could not extract text from the PDF. It might be scanned or image-based.")
                 else:
-                    st.info(f"Successfully extracted text from {max_pages_to_read} out of {total_pages} pages. Analyzing for procurement items...")
+                    st.info(f"Successfully extracted text from {max_pages_to_read} out of {total_pages} pages. Generating procurement log...")
                     
                     # AI Prompt mapped to USA CSI standards
                     prompt = """
