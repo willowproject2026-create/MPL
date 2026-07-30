@@ -1,72 +1,77 @@
-import streamlit as st
+import os
+import re
+from pypdf import PdfReader
 import google.generativeai as genai
-import PyPDF2
 
-# Frontend UI Design - Vertical Layout
-st.set_page_config(page_title="Specs Procurement Extractor", layout="centered")
+def run_pe_procurement_extractor(pdf_path, gemini_api_key):
+    # 1. Configure Gemini
+    genai.configure(api_key=gemini_api_key)
+    # Using a fast, high-context model
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    
+    reader = PdfReader(pdf_path)
+    total_pages = len(reader.pages)
+    print(f"[*] Total pages detected: {total_pages}. Scanning for CSI Sections...")
+    
+    section_pattern = re.compile(r'(?:Section\s*)?(\d{2}\s*\d{2}\s*\d{2})', re.IGNORECASE)
+    
+    current_section = "General_Introduction"
+    section_text = ""
+    extracted_results = {}
 
-st.title("Construction Specs Procurement Extractor")
-st.markdown("Upload a CSI MasterFormat specification file to automatically generate a categorized procurement log.")
+    for page_num in range(total_pages):
+        text = reader.pages[page_num].extract_text()
+        if not text:
+            continue
+            
+        matches = section_pattern.findall(text)
+        if matches:
+            # If we were processing an existing section, run the AI Killer Prompt on it before moving on
+            if section_text.strip():
+                print(f"[*] Processing {current_section} via AI Killer Prompt...")
+                extracted_results[current_section] = analyze_with_killer_prompt(model, current_section, section_text)
+            
+            current_section = f"Section_{matches[0].replace(' ', '_')}"
+            section_text = ""
+            
+        section_text += text + "\n"
+        
+    # Process the last section
+    if section_text.strip():
+        print(f"[*] Processing final section {current_section} via AI Killer Prompt...")
+        extracted_results[current_section] = analyze_with_killer_prompt(model, current_section, section_text)
+        
+    print("[+] Processing complete! All sections extracted and analyzed successfully.")
+    return extracted_results
 
-# Vertical input sections
-api_key = st.text_input("Google Gemini API Key", type="password", placeholder="Enter your free API Key")
-uploaded_file = st.file_uploader("Upload Specification PDF", type=["pdf"])
+def analyze_with_killer_prompt(model, section_name, text_content):
+    # The Elite PE AI Killer Prompt
+    killer_prompt = f"""
+    You are an elite, senior Construction Project Engineer (PE) in the United States under CSI MasterFormat standards. 
+    Analyze the provided specification text for {section_name} and extract a comprehensive, structured Procurement & Long-Lead Master Log. 
 
-# Processing logic
-if st.button("Process Specifications", type="primary"):
-    if not api_key:
-        st.error("Error: Please provide a Gemini API Key to process the document.")
-    elif not uploaded_file:
-        st.error("Error: Please upload a specification PDF file.")
-    else:
-        with st.spinner("Connecting to Gemini 3.5 Flash and analyzing specifications..."):
-            try:
-                # Configure AI using Gemini 3.5 Flash explicitly
-                genai.configure(api_key=api_key)
-                model = genai.GenerativeModel('gemini-3.5-flash')
-                
-                # Extract text from PDF safely
-                text = ""
-                reader = PyPDF2.PdfReader(uploaded_file)
-                total_pages = len(reader.pages)
-                
-                # Read up to first 100 pages to ensure smooth processing and stay within safe limits
-                max_pages_to_read = min(total_pages, 100)
-                for i in range(max_pages_to_read):
-                    extracted = reader.pages[i].extract_text()
-                    if extracted:
-                        text += extracted + "\n"
-                
-                if not text.strip():
-                    st.error("Error: Could not extract text from the PDF. It might be scanned or image-based.")
-                else:
-                    st.info(f"Using model: gemini-3.5-flash | Extracted {max_pages_to_read} of {total_pages} pages. Generating procurement log...")
-                    
-                    # AI Prompt mapped to USA CSI standards
-                    prompt = """
-                    You are an expert construction project engineer. Analyze the following project specification text.
-                    Please structure the output vertically.
-                    Do not use any Arabic text in the output. The output must be entirely in English.
-                    
-                    Task:
-                    1. Identify all CSI MasterFormat Divisions present in the text.
-                    2. Under each Division, list the corresponding Sections.
-                    3. For each Section, generate a detailed Procurement Table containing these exact columns:
-                       - Item Description
-                       - Category (e.g., Bulk Material, Architectural, MEP Equipment)
-                       - Lead Time & Risk Status (Use ⚠️ for Long-Lead items)
-                       - Action Type (Classify as 'Essential' or 'Secondary / Minor')
-                       
-                    Format the entire response as clean Markdown. Use clear headers for Divisions and tables for the Sections.
-                    
-                    Specification Text:
-                    """
-                    
-                    response = model.generate_content(prompt + text)
-                    
-                    st.success("Analysis Complete!")
-                    st.markdown("### Analysis Output")
-                    st.markdown(response.text)
-                    
-            except Exception as e:
-                st.error(f"An error occurred during processing: {str(e)}")
+    Strict Rules for Output:
+    1. Do not use any Arabic text. The output must be entirely in professional English.
+    2. Structure the output as a clean Markdown table with the following exact columns:
+       - CSI Division & Section
+       - Item Description (Specific material, equipment, or product)
+       - Supply Type (Contractor-Furnished vs. Owner-Furnished [OFCI / OFOI])
+       - Estimated Lead Time / Risk Level (Standard, Long-Lead [⚠️ CRITICAL], or High-Risk)
+       - Required Submittal Type (Shop Drawings, Product Data, Samples, or Attic Stock)
+    3. Focus strictly on facts mentioned in the text. Do not hallucinate.
+
+    Specification Text:
+    {text_content[:30000]}  # Safely capping chunk size to maintain absolute precision
+    """
+    
+    try:
+        response = model.generate_content(killer_prompt)
+        return response.text
+    except Exception as e:
+        return f"Error processing section: {str(e)}"
+
+# طريقة التشغيل:
+# results = run_pe_procurement_extractor("path_to_large_specs.pdf", "YOUR_GEMINI_API_KEY")
+# for sec, analysis in results.items():
+#     print(f"\n--- {sec} ---\n")
+#     print(analysis)
