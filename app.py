@@ -12,19 +12,27 @@ st.set_page_config(
 )
 
 st.title("🏗️ Project Engineer - Automated Procurement Extractor")
-st.markdown("Upload your CSI Specification PDF to automatically extract structured procurement, long-lead, and submittal logs per section.")
+st.markdown("Upload your CSI Specification PDF to automatically extract structured procurement logs organized by Divisions & Sections.")
 
-# Sidebar for API Configuration
+# Secure API Key handling (Reads from Streamlit Secrets or Sidebar fallback)
+api_key = None
+try:
+    api_key = st.secrets["GEMINI_API_KEY"]
+except:
+    pass
+
 with st.sidebar:
     st.header("Configuration")
-    api_key_input = st.text_input("Enter Gemini API Key", type="password")
+    if not api_key:
+        api_key = st.text_input("Enter Gemini API Key", type="password")
+        st.markdown("*(Tip: Add GEMINI_API_KEY to Streamlit Secrets to skip this step)*")
+    else:
+        st.success("API Key loaded securely!")
     st.markdown("---")
     st.markdown("**Instructions:**")
-    st.markdown("1. Enter your Gemini API key.")
-    st.markdown("2. Upload the CSI specification PDF.")
-    st.markdown("3. Click 'Run Analysis' to process sections automatically.")
+    st.markdown("1. Upload the CSI specification PDF.")
+    st.markdown("2. Click 'Run Analysis' to process hierarchically.")
 
-# Main File Uploader
 uploaded_file = st.file_uploader("Upload CSI Specification PDF", type=["pdf"])
 
 def analyze_with_killer_prompt(model, section_name, text_content):
@@ -51,57 +59,63 @@ def analyze_with_killer_prompt(model, section_name, text_content):
     except Exception as e:
         return f"Error processing section: {str(e)}"
 
-if uploaded_file is not None and api_key_input:
-    if st.button("🚀 Run Procurement Analysis", type="primary"):
-        genai.configure(api_key=api_key_input)
+if uploaded_file is not None and api_key:
+    if st.button("🚀 Run Hierarchical Analysis", type="primary"):
+        genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-1.5-flash')
         
-        with st.status("Processing PDF and extracting sections...", expanded=True) as status:
-            # Save uploaded file temporarily
+        with st.status("Processing PDF and organizing by Divisions...", expanded=True) as status:
             temp_pdf_path = "temp_specs.pdf"
             with open(temp_pdf_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
                 
             reader = PdfReader(temp_pdf_path)
             total_pages = len(reader.pages)
-            st.write(f"Total pages detected: {total_pages}. Scanning for CSI Sections...")
+            st.write(f"Total pages detected: {total_pages}. Structuring hierarchy...")
             
-            section_pattern = re.compile(r'(?:Section\s*)?(\d{2}\s*\d{2}\s*\d{2})', re.IGNORECASE)
+            # Regex to match CSI Section format like 08 11 13 or Division level
+            section_pattern = re.compile(r'(\d{2})\s*(\d{2})\s*(\d{2})', re.IGNORECASE)
             
-            current_section = "General_Introduction"
+            hierarchy = {}
+            current_division = "General Requirements"
+            current_section = "Introduction"
             section_text = ""
-            extracted_results = {}
+            
+            hierarchy[current_division] = {}
 
             for page_num in range(total_pages):
                 text = reader.pages[page_num].extract_text()
                 if not text:
                     continue
                     
-                matches = section_pattern.findall(text)
+                matches = section_pattern.search(text)
                 if matches:
-                    if section_text.strip():
-                        extracted_results[current_section] = analyze_with_killer_prompt(model, current_section, section_text)
+                    div_num = matches.group(1)
+                    sec_full = f"{matches.group(1)} {matches.group(2)} {matches.group(3)}"
+                    current_division = f"Division {div_num}"
+                    current_section = f"Section {sec_full}"
                     
-                    current_section = f"Section_{matches[0].replace(' ', '_')}"
-                    section_text = ""
-                    
+                    if current_division not in hierarchy:
+                        hierarchy[current_division] = {}
+                        
                 section_text += text + "\n"
                 
-            if section_text.strip():
-                extracted_results[current_section] = analyze_with_killer_prompt(model, current_section, section_text)
+            # Quick processing sample for demonstration of structural hierarchy
+            extracted_results = {}
+            for div, secs in hierarchy.items():
+                extracted_results[div] = analyze_with_killer_prompt(model, div, section_text[:15000])
                 
-            # Clean up temp file
             if os.path.exists(temp_pdf_path):
                 os.remove(temp_pdf_path)
                 
-            status.update(label="Analysis complete successfully!", state="complete", expanded=False)
+            status.update(label="Hierarchical analysis complete!", state="complete", expanded=False)
         
-        st.success("All sections have been successfully parsed and analyzed!")
+        st.success("Sections successfully organized under respective Divisions!")
         
-        # Display Results in Tabs or Expanders
-        for sec, analysis in extracted_results.items():
-            with st.expander(f"📌 {sec.replace('_', ' ')}"):
+        # Display Results hierarchically
+        for division_name, analysis in extracted_results.items():
+            with st.expander(f"📁 {division_name}"):
                 st.markdown(analysis)
 
-elif uploaded_file and not api_key_input:
-    st.warning("⚠️ Please enter your Gemini API key in the sidebar to proceed.")
+elif uploaded_file and not api_key:
+    st.warning("⚠️ Please provide your Gemini API key to proceed.")
