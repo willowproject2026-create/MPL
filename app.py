@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("🏗️ Project Engineer - Automated Procurement Extractor")
-st.markdown("Upload your CSI Specification PDF to extract structured procurement logs organized strictly by valid MasterFormat Divisions.")
+st.markdown("Upload your CSI Specification PDF to extract structured procurement logs organized strictly by valid MasterFormat Divisions using Gemini 3.5 Flash.")
 
 # Secure API Key handling
 api_key = None
@@ -34,7 +34,7 @@ with st.sidebar:
 
 uploaded_file = st.file_uploader("Upload CSI Specification PDF", type=["pdf"])
 
-def analyze_with_killer_prompt(model, division_name, text_content):
+def analyze_with_killer_prompt(division_name, text_content):
     killer_prompt = f"""
     You are an elite, senior Construction Project Engineer (PE) in the United States under CSI MasterFormat standards. 
     Analyze the provided specification text for {division_name} and extract a comprehensive, structured Procurement & Long-Lead Master Log. 
@@ -50,10 +50,11 @@ def analyze_with_killer_prompt(model, division_name, text_content):
     3. Focus strictly on facts mentioned in the text. Do not hallucinate.
 
     Specification Text:
-    {text_content[:30000]}
+    {text_content[:25000]}
     """
     try:
-        # Using the standard generative model call
+        # Explicitly using gemini-3.5-flash as requested
+        model = genai.GenerativeModel('gemini-3.5-flash')
         response = model.generate_content(killer_prompt)
         return response.text
     except Exception as e:
@@ -61,11 +62,7 @@ def analyze_with_killer_prompt(model, division_name, text_content):
 
 if uploaded_file is not None and api_key:
     if st.button("🚀 Run Clean Hierarchical Analysis", type="primary"):
-        # Configure using the correct client initialization
         genai.configure(api_key=api_key)
-        
-        # Explicitly use the stable gemini-1.5-flash model name supported by the API
-        model = genai.GenerativeModel('gemini-1.5-flash')
         
         with st.status("Processing PDF and filtering valid divisions...", expanded=True) as status:
             temp_pdf_path = "temp_specs.pdf"
@@ -76,8 +73,7 @@ if uploaded_file is not None and api_key:
             total_pages = len(reader.pages)
             st.write(f"Total pages detected: {total_pages}. Parsing valid CSI Divisions...")
             
-            # Strict regex to capture valid 2-digit CSI MasterFormat Divisions (00 through 48)
-            division_pattern = re.compile(r'\b(0[0-9]|1[0-4]|2[1-8]|3[1-5]|4[0-8])\s*00\s*00\b|\b(0[0-9]|1[0-4]|2[1-8]|3[1-5]|4[0-8])\b', re.IGNORECASE)
+            division_pattern = re.compile(r'\b(0[0-9]|1[0-4]|2[1-8]|3[1-5]|4[0-8])\b', re.IGNORECASE)
             
             division_texts = {}
             current_division = "Division 01 - General Requirements"
@@ -88,11 +84,10 @@ if uploaded_file is not None and api_key:
                 if not text:
                     continue
                     
-                # Look for clear division headers in the page text
                 matches = division_pattern.findall(text)
                 if matches:
                     for match in matches:
-                        div_num = match[0] or match[1]
+                        div_num = match if isinstance(match, str) else match[0]
                         if div_num:
                             potential_div = f"Division {div_num}"
                             if potential_div != current_division:
@@ -103,10 +98,9 @@ if uploaded_file is not None and api_key:
                 division_texts[current_division] += text + "\n"
                 
             extracted_results = {}
-            # Filter out empty or invalid noise entries, process only legitimate divisions with content
             for div_name, div_content in division_texts.items():
-                if len(div_content.strip()) > 500: # Ensure there's actual content to analyze
-                    extracted_results[div_name] = analyze_with_killer_prompt(model, div_name, div_content[:25000])
+                if len(div_content.strip()) > 300:
+                    extracted_results[div_name] = analyze_with_killer_prompt(div_name, div_content)
                 
             if os.path.exists(temp_pdf_path):
                 os.remove(temp_pdf_path)
@@ -115,7 +109,6 @@ if uploaded_file is not None and api_key:
         
         if extracted_results:
             st.success("Valid divisions successfully parsed and analyzed!")
-            # Sort divisions numerically so they appear in correct order (Division 01, 02, 08, etc.)
             sorted_divisions = sorted(extracted_results.keys())
             
             for division_name in sorted_divisions:
@@ -123,7 +116,7 @@ if uploaded_file is not None and api_key:
                 with st.expander(f"📁 {division_name}"):
                     st.markdown(analysis)
         else:
-            st.warning("⚠️ No valid CSI divisions were detected with sufficient text. Please check the PDF format.")
+            st.warning("⚠️ No valid CSI divisions were detected with sufficient text.")
 
 elif uploaded_file and not api_key:
     st.warning("⚠️ Please provide your Gemini API key.")
